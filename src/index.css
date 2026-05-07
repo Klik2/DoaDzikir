@@ -13,5 +13,5 @@
 .line-spacing-2 { line-height: 2; }
 
 @theme {
-  --font-arabic: "Amiri", "Traditional Arabic", serif;
+  --font-arabic: "Amiri", "Amiri Quran", "Traditional Arabic", "Scheherazade New", serif;
 }

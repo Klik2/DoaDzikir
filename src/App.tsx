@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import * as htmlToImage from 'html-to-image';
-
-// --- INITIALIZE AI ---
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+import gifshot from 'gifshot';
 
 // --- INLINE SVG ICON COMPONENTS ---
 const VolumeIcon = ({ size = 24, className = "" }) => (
@@ -245,6 +242,18 @@ const uiDict = {
     chooseAudio: "Pilih Audio Dzikir",
     playing: "Memutar",
     paused: "Berhenti Sejenak",
+    playbackSpeed: "Kecepatan Baca",
+    fontStyle: "Gaya Tulisan",
+    dyslexicFont: "Ramah Disleksia",
+    standardFont: "Standar",
+    reportIssue: "Lapor Masalah",
+    feedbackSent: "Terima kasih atas masukan Anda!",
+    feedbackTitle: "Masukan Terjemahan",
+    feedbackPlaceholder: "Jelaskan kesalahan atau saran perbaikan...",
+    submit: "Kirim",
+    cancel: "Batal",
+    feedback: "Masukan",
+    shareGif: "GIF (Animasi)",
   },
   en: {
     pagi: "Morning Dzikir",
@@ -296,23 +305,42 @@ const uiDict = {
     chooseAudio: "Choose Audio",
     playing: "Playing",
     paused: "Paused",
+    playbackSpeed: "Playback Speed",
+    fontStyle: "Font Style",
+    dyslexicFont: "Dyslexia Friendly",
+    standardFont: "Standard",
+    reportIssue: "Report Issue",
+    feedbackSent: "Thank you for your feedback!",
+    feedbackTitle: "Translation Feedback",
+    feedbackPlaceholder: "Describe the error or suggest an improvement...",
+    submit: "Submit",
+    cancel: "Cancel",
+    feedback: "Feedback",
+    shareGif: "GIF (Animated)",
   }
 };
 
-const LANGUAGES = [
-  { code: 'id', name: 'Bahasa Indonesia', flag: '🇮🇩' },
-  { code: 'en', name: 'English', flag: '🇺🇸' },
-  { code: 'ms', name: 'Bahasa Melayu', flag: '🇲🇾' },
-  { code: 'ar', name: 'العربية', flag: '🇸🇦' },
-  { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
-  { code: 'fr', name: 'Français', flag: '🇫🇷' },
-  { code: 'es', name: 'Español', flag: '🇪🇸' },
-  { code: 'de', name: 'Deutsch', flag: '🇩🇪' },
-  { code: 'ru', name: 'Русский', flag: '🇷🇺' },
-  { code: 'ja', name: '日本語', flag: '🇯🇵' },
-  { code: 'ko', name: '한국어', flag: '🇰🇷' },
-  { code: 'zh', name: '中文', flag: '🇨🇳' },
-];
+  const LANGUAGES = [
+    { code: 'id', name: 'Bahasa Indonesia', flag: '🇮🇩' },
+    { code: 'en', name: 'English', flag: '🇺🇸' },
+    { code: 'ms', name: 'Bahasa Melayu', flag: '🇲🇾' },
+    { code: 'ar', name: 'العربية', flag: '🇸🇦' },
+    { code: 'tr', name: 'Türkçe', flag: '🇹🇷' },
+    { code: 'fr', name: 'Français', flag: '🇫🇷' },
+    { code: 'es', name: 'Español', flag: '🇪🇸' },
+    { code: 'de', name: 'Deutsch', flag: '🇩🇪' },
+    { code: 'ru', name: 'Русский', flag: '🇷🇺' },
+    { code: 'ja', name: '日本語', flag: '🇯🇵' },
+    { code: 'ko', name: '한국어', flag: '🇰🇷' },
+    { code: 'zh', name: '中文', flag: '🇨🇳' },
+    { code: 'nl', name: 'Nederlands', flag: '🇳🇱' },
+    { code: 'it', name: 'Italiano', flag: '🇮🇹' },
+    { code: 'ur', name: 'اردو', flag: '🇵🇰' },
+    { code: 'hi', name: 'हिन्दी', flag: '🇮🇳' },
+    { code: 'pt', name: 'Português', flag: '🇵🇹' },
+    { code: 'uz', name: 'Oʻzbekcha', flag: '🇺🇿' },
+    { code: 'fa', name: 'فارسی', flag: '🇮🇷' },
+  ];
 
 
 // --- DATASET: DZIKIR PAGI ---
@@ -603,8 +631,17 @@ export default function App() {
   const [isTranslating, setIsTranslating] = useState(false);
   const [uiTranslations, setUiTranslations] = useState<Record<string, string>>({});
   const [titleTranslation, setTitleTranslation] = useState("");
+  const [currentLatinTranslation, setCurrentLatinTranslation] = useState("");
   const [showShareOptions, setShowShareOptions] = useState<boolean>(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [captureProgress, setCaptureProgress] = useState(0);
+  const [flipProgress, setFlipProgress] = useState(0); // 0 to 1
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [fontFamily, setFontFamily] = useState<'sans' | 'dyslexic'>('sans');
+  const [arabicLineHeight, setArabicLineHeight] = useState(1.6);
+  const [arabicLetterSpacing, setArabicLetterSpacing] = useState(0);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
   const shareCardRef = useRef<HTMLDivElement>(null);
 
   // --- AUDIO PLAYER STATE ---
@@ -638,9 +675,16 @@ export default function App() {
     if (!playerRef.current) return;
     vibrate(30);
     playerRef.current.pause();
+    playerRef.current.playbackRate = playbackSpeed;
     playerRef.current.currentTime = 0;
     setIsAudioPlaying(false);
   };
+
+  useEffect(() => {
+    if (playerRef.current) {
+      playerRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed]);
 
   const formatTime = (time: number) => {
     const mins = Math.floor(time / 60);
@@ -669,33 +713,40 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('dzikir_target_lang', targetLang);
+    // Update dynamic meta description and html lang
+    const langName = LANGUAGES.find(l => l.code === targetLang)?.name || 'Language';
+    document.documentElement.lang = targetLang;
+    const metaDesc = document.querySelector('meta[name="description"]');
+    if (metaDesc) {
+      metaDesc.setAttribute('content', `Dzikir Pagi & Petang translated to ${langName}. Koleksi doa Al-Qur'an & Hadist inklusif oleh Te_eR™ Inovative.`);
+    }
   }, [targetLang]);
 
   useEffect(() => {
     localStorage.setItem('dzikir_translations', JSON.stringify(translationCache));
   }, [translationCache]);
 
-  const translateText = async (text: string, targetCode: string, isUI = false) => {
+  const translateText = async (text: string, targetCode: string, _isUI = false) => {
     if (targetCode === 'id' || !text) return text;
     const cacheKey = `${targetCode}:${text}`;
     if (translationCache[cacheKey]) return translationCache[cacheKey];
 
     setIsTranslating(true);
     try {
-      const targetLangName = LANGUAGES.find(l => l.code === targetCode)?.name || targetCode;
-      const prompt = isUI 
-        ? `Translate this short mobile app UI text/button to ${targetLangName}. Keep it concise and natural. Only return the translated text: "${text}"`
-        : `Translate the following Islamic prayer/invocation text to ${targetLangName}. Preserve the religious context and use respectful tone. Only return the translated text, no explanation: "${text}"`;
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetCode}&dt=t&q=${encodeURIComponent(text)}`;
+      const response = await fetch(url);
+      const data = await response.json();
       
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-      });
-      const result = (response.text || text).trim();
-      setTranslationCache(prev => ({ ...prev, [cacheKey]: result }));
-      return result;
+      // Google Translate GTX returns an array of chunks
+      const result = data[0].map((x: any) => x[0]).join('');
+      
+      if (result) {
+        setTranslationCache(prev => ({ ...prev, [cacheKey]: result }));
+        return result;
+      }
+      return text;
     } catch (error) {
-      console.error("Translation error:", error);
+      console.error("Translation error (Google Translate):", error);
       return text;
     } finally {
       setIsTranslating(false);
@@ -814,12 +865,17 @@ export default function App() {
       if (targetLang === 'id') {
         setCurrentTranslation(item.translation);
         setCurrentNoteTranslation(item.note || "");
+        setCurrentLatinTranslation(item.latin);
         setTitleTranslation(item.title);
       } else {
         const tTitle = await translateText(item.title, targetLang, true);
         setTitleTranslation(tTitle);
         const tMain = await translateText(item.translation, targetLang);
         setCurrentTranslation(tMain);
+        
+        // Latin and Arabic remain original (strict rule)
+        setCurrentLatinTranslation(item.latin);
+        
         if (item.note) {
           const tNote = await translateText(item.note, targetLang);
           setCurrentNoteTranslation(tNote);
@@ -886,7 +942,7 @@ export default function App() {
     stopAll();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = vLang;
-    utterance.rate = isA11yMode ? 0.7 : 1.0;
+    utterance.rate = isA11yMode ? (playbackSpeed * 0.7) : playbackSpeed;
     utterance.volume = speechVolume;
     
     utterance.onstart = () => {
@@ -971,10 +1027,68 @@ export default function App() {
     }
   };
 
+  const shareAsGif = async () => {
+    if (!shareCardRef.current) return;
+    setIsCapturing(true);
+    setCaptureProgress(0);
+    setFlipProgress(0);
+    vibrate(50);
+    setToast(t.preparing);
+
+    try {
+      const frames = [];
+      const frameCount = 8;
+      
+      for (let i = 0; i <= frameCount; i++) {
+        const progress = i / frameCount;
+        setFlipProgress(progress);
+        setCaptureProgress(progress * 100);
+        
+        // Wait for render
+        await new Promise(r => setTimeout(r, 150));
+        
+        const dataUrl = await htmlToImage.toJpeg(shareCardRef.current, {
+          quality: 0.8,
+          backgroundColor: isDarkMode ? '#020617' : '#fafaf9',
+          width: 400, // Reduced size for GIF performance
+          height: 600,
+        });
+        frames.push(dataUrl);
+      }
+
+      gifshot.createGIF({
+        images: frames,
+        gifWidth: 400,
+        gifHeight: 600,
+        interval: 0.15,
+        numFrames: frames.length,
+        frameDuration: 1,
+      }, (obj: any) => {
+        if (!obj.error) {
+          const link = document.createElement('a');
+          link.download = `dzikir-${item.id}.gif`;
+          link.href = obj.image;
+          link.click();
+          setToast(t.copied);
+        } else {
+          console.error("GIF generation error:", obj.error);
+        }
+        setIsCapturing(false);
+        setFlipProgress(0);
+        setShowShareOptions(false);
+      });
+    } catch (err) {
+      console.error("GIF export failed:", err);
+      setIsCapturing(false);
+      setFlipProgress(0);
+    }
+  };
+
   // --- STYLING LOGIC ---
   const isDarkMode = theme === 'dark' || isA11yMode;
   const contrastClass = contrastMode === 'ultra' ? 'contrast-[1.15] brightness-[1.05] saturate-[1.2]' : contrastMode === 'high' ? 'contrast-[1.1]' : '';
   const spacingClass = lineSpacing === 2 ? 'line-spacing-2' : lineSpacing === 1.5 ? 'line-spacing-1-5' : 'line-spacing-1';
+  const fontClass = fontFamily === 'dyslexic' ? 'font-dyslexic tracking-wide leading-relaxed' : '';
   
   const themeClass = isA11yMode 
     ? "bg-black text-yellow-300 font-bold" 
@@ -1001,8 +1115,37 @@ export default function App() {
   const latinSize = isA11yMode ? "text-3xl md:text-5xl" : getFontSize('text-lg', fontScaleUI) + " md:" + (fontScaleUI > 1.5 ? "text-5xl" : fontScaleUI > 1.2 ? "text-4xl" : "text-xl");
   const translationSize = isA11yMode ? "text-2xl md:text-4xl" : getFontSize('text-base', fontScaleUI) + " md:" + (fontScaleUI > 1.5 ? "text-4xl" : fontScaleUI > 1.2 ? "text-3xl" : "text-lg");
 
+  const handleSubmitFeedback = () => {
+    vibrate(50);
+    setToast(t.feedbackSent);
+    setTimeout(() => setToast(null), 3000);
+    setShowFeedbackModal(false);
+    setFeedbackText("");
+  };
+
   return (
-    <div id="app-root" className={`min-h-screen flex flex-col transition-all duration-500 ${themeClass} ${contrastClass}`}>
+    <div id="app-root" className={`min-h-screen flex flex-col transition-all duration-500 ${themeClass} ${contrastClass} ${fontClass}`}>
+      <style>{`
+        .font-dyslexic {
+          font-family: 'Comic Sans MS', cursive, sans-serif !important;
+          font-weight: 500 !important;
+        }
+        @media (min-width: 768px) {
+          .line-spacing-1 { line-height: 1.2; }
+          .line-spacing-1-5 { line-height: 1.6; }
+          .line-spacing-2 { line-height: 2.2; }
+        }
+        .page-fold {
+          position: absolute;
+          top: 0;
+          right: 0;
+          width: 0;
+          height: 0;
+          background: linear-gradient(135deg, transparent 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.2) 100%);
+          z-index: 60;
+          pointer-events: none;
+        }
+      `}</style>
       
       {/* TOP HEADER */}
       <header className={`sticky top-0 z-50 p-4 flex items-center justify-between border-b ${isA11yMode ? 'bg-black border-yellow-300' : isDarkMode ? 'bg-slate-900/90 border-slate-800' : 'bg-white/90 border-stone-200'} backdrop-blur-md`} id="main-header">
@@ -1029,7 +1172,15 @@ export default function App() {
             <SearchIcon size={isA11yMode ? 32 : 24} />
           </button>
           <button 
+             onClick={() => { vibrate(10); setShowFeedbackModal(true); }}
+             className={`p-3 rounded-xl transition-all ${isA11yMode ? 'border-4 border-yellow-300' : isDarkMode ? 'bg-slate-800 text-white' : 'bg-stone-100'}`}
+             aria-label={t.feedback}
+          >
+            <MessageCircleIcon size={isA11yMode ? 32 : 24} />
+          </button>
+          <button 
             id="cat-toggle"
+            aria-label={`Switch to ${category === 'pagi' ? 'Morning' : 'Evening'} Dzikir`}
             onClick={() => { vibrate(20); setCategory(category === 'pagi' ? 'petang' : 'pagi'); setPageIndex(0); stopAll(); }}
             className={`px-4 py-2 rounded-xl font-bold uppercase transition-all ${isA11yMode ? 'border-4 border-yellow-300' : isDarkMode ? 'bg-slate-800 text-white' : 'bg-slate-200 text-slate-800'}`}
           >
@@ -1037,6 +1188,8 @@ export default function App() {
           </button>
           <button 
             id="btn-settings"
+            aria-expanded={showSettings}
+            aria-label={t.theme}
             onClick={() => { vibrate(10); setShowSettings(!showSettings); }}
             className={`p-3 rounded-xl transition-all ${isA11yMode ? 'border-4 border-yellow-300' : isDarkMode ? 'bg-slate-800 text-white' : 'bg-stone-100'}`}
           >
@@ -1044,6 +1197,47 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* FEEDBACK MODAL */}
+      <AnimatePresence>
+        {showFeedbackModal && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-md flex items-center justify-center p-6"
+            onClick={() => setShowFeedbackModal(false)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
+              className={`w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative ${isDarkMode ? 'bg-slate-900 text-white' : 'bg-white text-slate-800'}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+               <h3 className="text-2xl font-black uppercase tracking-tight mb-6">{t.feedbackTitle}</h3>
+               <textarea 
+                 autoFocus
+                 value={feedbackText}
+                 onChange={(e) => setFeedbackText(e.target.value)}
+                 placeholder={t.feedbackPlaceholder}
+                 className={`w-full h-40 p-4 rounded-3xl border-none ring-2 ring-transparent bg-black/5 focus:ring-blue-500 outline-none font-medium mb-6 resize-none`}
+               />
+               <div className="flex gap-4">
+                  <button 
+                    onClick={() => setShowFeedbackModal(false)}
+                    className={`flex-1 py-4 rounded-2xl font-black uppercase tracking-widest bg-black/5 hover:bg-black/10 transition-all`}
+                  >
+                    {t.cancel}
+                  </button>
+                  <button 
+                    onClick={handleSubmitFeedback}
+                    disabled={!feedbackText.trim()}
+                    className={`flex-1 py-4 rounded-2xl font-black uppercase tracking-widest bg-blue-600 text-white hover:bg-blue-700 transition-all disabled:opacity-50`}
+                  >
+                    {t.submit}
+                  </button>
+               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* SEARCH MODAL */}
       <AnimatePresence>
@@ -1142,11 +1336,47 @@ export default function App() {
               </button>
 
               <div className="p-4 rounded-2xl bg-black/5 flex flex-col gap-3">
+                <span className="text-xs font-black uppercase opacity-60 tracking-widest">{t.fontStyle}</span>
+                <div className="flex items-center gap-2">
+                   {(['sans', 'dyslexic'] as const).map(v => (
+                     <button key={v} onClick={() => { vibrate(); setFontFamily(v); }} className={`flex-1 p-2 rounded-xl font-black text-xs uppercase transition-all ${fontFamily === v ? 'bg-blue-500 text-white' : 'bg-white/50 dark:bg-white/10'}`}>{v === 'sans' ? t.standardFont : t.dyslexicFont}</button>
+                   ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-black/5 flex flex-col gap-3">
+                <span className="text-xs font-black uppercase opacity-60 tracking-widest">{t.playbackSpeed}</span>
+                <div className="flex items-center gap-2">
+                   {[0.5, 0.75, 1, 1.25, 1.5].map(v => (
+                     <button key={v} onClick={() => { vibrate(); setPlaybackSpeed(v); }} className={`flex-1 p-2 rounded-xl font-black text-xs transition-all ${playbackSpeed === v ? 'bg-blue-500 text-white' : 'bg-white/50 dark:bg-white/10'}`}>{v}x</button>
+                   ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-black/5 flex flex-col gap-3">
                 <span className="text-xs font-black uppercase opacity-60 tracking-widest">{t.arabicSize}</span>
                 <div className="flex items-center gap-4">
-                  <button onClick={() => adjustFont('arabic', -0.1)} className="flex-1 bg-white/50 dark:bg-white/10 p-2 rounded-xl font-black text-xl hover:bg-white/80 transition-all">-</button>
+                  <button onClick={() => { vibrate(); adjustFont('arabic', -0.1); }} className="flex-1 bg-white/50 dark:bg-white/10 p-2 rounded-xl font-black text-xl hover:bg-white/80 transition-all">-</button>
                   <span className="font-mono font-black">{Math.round(fontScaleArabic * 100)}%</span>
-                  <button onClick={() => adjustFont('arabic', 0.1)} className="flex-1 bg-white/50 dark:bg-white/10 p-2 rounded-xl font-black text-xl hover:bg-white/80 transition-all">+</button>
+                  <button onClick={() => { vibrate(); adjustFont('arabic', 0.1); }} className="flex-1 bg-white/50 dark:bg-white/10 p-2 rounded-xl font-black text-xl hover:bg-white/80 transition-all">+</button>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-black/5 flex flex-col gap-3">
+                <span className="text-xs font-black uppercase opacity-60 tracking-widest">Arab: Jarak Baris</span>
+                <div className="flex items-center gap-2">
+                   {[1.2, 1.6, 2, 2.5].map(v => (
+                     <button key={v} onClick={() => { vibrate(10); setArabicLineHeight(v); }} className={`flex-1 p-2 rounded-xl font-black text-xs transition-all ${arabicLineHeight === v ? 'bg-orange-500 text-white' : 'bg-white/50 dark:bg-white/10'}`}>{v}x</button>
+                   ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-black/5 flex flex-col gap-3">
+                <span className="text-xs font-black uppercase opacity-60 tracking-widest">Arab: Jarak Kata</span>
+                <div className="flex items-center gap-2">
+                   {[0, 1, 2, 4].map(v => (
+                     <button key={v} onClick={() => { vibrate(10); setArabicLetterSpacing(v); }} className={`flex-1 p-2 rounded-xl font-black text-xs transition-all ${arabicLetterSpacing === v ? 'bg-orange-500 text-white' : 'bg-white/50 dark:bg-white/10'}`}>{v}px</button>
+                   ))}
                 </div>
               </div>
 
@@ -1213,6 +1443,8 @@ export default function App() {
       <AnimatePresence>
         {isSpeaking && (
           <motion.div 
+            role="alert"
+            aria-live="polite"
             initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
             className={`fixed bottom-40 left-1/2 -translate-x-1/2 z-50 p-4 px-8 rounded-3xl shadow-2xl flex flex-col gap-4 min-w-[320px] transition-colors ${isA11yMode ? 'bg-yellow-300 text-black font-black border-4 border-black' : isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-800'}`}
           >
@@ -1318,13 +1550,26 @@ export default function App() {
             dragElastic={0.2}
             onDragEnd={handleDragEnd}
             initial={{ opacity: 0, x: 600, rotateY: 90, scale: 0.8 }}
-            animate={{ opacity: 1, x: 0, rotateY: 0, scale: 1 }}
+            animate={{ 
+              opacity: 1, 
+              x: isCapturing ? (-600 * flipProgress) : 0, 
+              rotateY: isCapturing ? (-90 * flipProgress) : 0, 
+              scale: 1 
+            }}
             exit={{ opacity: 0, x: -600, rotateY: -90, scale: 0.8 }}
             whileHover={{ scale: isA11yMode ? 1 : 1.01, boxShadow: '0 35px 60px -15px rgba(0, 0, 0, 0.6)' }}
             transition={{ type: 'spring', damping: 25, stiffness: 120 }}
             className={`w-full max-w-4xl h-full flex flex-col p-6 md:p-12 transition-all relative overflow-y-auto ${cardClass}`}
-            style={{ transformStyle: 'preserve-3d' }}
+            style={{ transformStyle: 'preserve-3d', boxShadow: 'inset -20px 0 40px rgba(0,0,0,0.1), 0 25px 50px -12px rgba(0,0,0,0.4)' }}
           >
+             {/* Realistic Page Curl Shadow Overlay during transition */}
+             <motion.div 
+               className="absolute top-0 right-0 h-full w-full pointer-events-none z-[60]"
+               initial={{ opacity: 0, background: 'linear-gradient(to right, transparent 0%, rgba(0,0,0,0.2) 100%)' }}
+               animate={{ opacity: 0 }}
+               exit={{ opacity: 1, background: 'linear-gradient(to right, transparent 80%, rgba(0,0,0,0.1) 90%, rgba(0,0,0,0.3) 100%)' }}
+             />
+
              <div ref={shareCardRef} className="w-full h-full flex flex-col relative rounded-inherit">
                 {/* INNER SHADOW OVERLAY FOR DEPTH DURING FLIP */}
                 <motion.div 
@@ -1348,8 +1593,12 @@ export default function App() {
                     <div 
                       role="button" tabIndex={0}
                       onClick={() => speak(item.arabic, 'ar-SA')}
-                      className={`text-right dir-rtl leading-relaxed cursor-pointer p-4 rounded-3xl hover:bg-yellow-500/5 transition-all ${arabicSize}`}
-                      style={{ direction: 'rtl' }}
+                      className={`text-right dir-rtl cursor-pointer p-4 rounded-3xl hover:bg-yellow-500/5 transition-all ${arabicSize}`}
+                      style={{ 
+                        direction: 'rtl', 
+                        lineHeight: arabicLineHeight, 
+                        letterSpacing: `${arabicLetterSpacing}px` 
+                      }}
                     >
                       {item.arabic}
                     </div>
@@ -1360,7 +1609,7 @@ export default function App() {
                     <section className="relative">
                       <div 
                         role="button" tabIndex={0}
-                        onClick={() => speak(item.latin, 'en-US')}
+                        onClick={() => speak(item.latin, 'id-ID')}
                         className={`p-6 border-l-8 italic cursor-pointer transition-all bg-black/5 hover:bg-blue-500/5 ${isDarkMode ? 'border-yellow-300' : 'border-blue-500'} ${latinSize}`}
                       >
                          {item.latin}
@@ -1381,7 +1630,16 @@ export default function App() {
                             <span className="text-xs font-black">{t.translating}</span>
                           </div>
                         ) : (
-                          currentTranslation || item.translation
+                          <div className="flex flex-col gap-4">
+                            <span>{currentTranslation || item.translation}</span>
+                            <button 
+                              onClick={() => { vibrate(10); setShowFeedbackModal(true); }}
+                              className="text-[10px] font-black uppercase opacity-30 hover:opacity-100 self-end flex items-center gap-1 group transition-all"
+                            >
+                              <MessageCircleIcon size={12} className="group-hover:text-blue-500" />
+                              {t.reportIssue}
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1403,12 +1661,21 @@ export default function App() {
                             <MessageCircleIcon size={16} />
                             {t.footnote}
                           </div>
-                          <button 
-                            onClick={() => setShowNoteTranslation(!showNoteTranslation)}
-                            className={`text-[10px] font-black uppercase border px-2 py-1 rounded-lg transition-all ${showNoteTranslation ? 'bg-blue-500 text-white border-blue-500' : 'opacity-40 border-current hover:opacity-100'}`}
-                          >
-                            {t.translateNote}
-                          </button>
+                          <div className="flex gap-2">
+                             <button 
+                               onClick={() => { vibrate(10); speak(currentNoteTranslation || item.note, targetLang === 'id' ? 'id-ID' : targetLang); }}
+                               className={`p-2 rounded-full transition-all bg-blue-500/10 text-blue-500 hover:bg-blue-500 hover:text-white`}
+                               title={t.listen}
+                             >
+                                <VolumeIcon size={14} />
+                             </button>
+                             <button 
+                               onClick={() => { vibrate(10); setShowNoteTranslation(!showNoteTranslation); }}
+                               className={`text-[10px] font-black uppercase border px-2 py-1 rounded-lg transition-all ${showNoteTranslation ? 'bg-blue-500 text-white border-blue-500' : 'opacity-40 border-current hover:opacity-100'}`}
+                             >
+                               {t.translateNote}
+                             </button>
+                          </div>
                         </div>
                         <div className="text-sm italic opacity-80 leading-relaxed font-medium">
                           {isTranslating ? t.translating : (currentNoteTranslation || item.note)}
@@ -1498,8 +1765,23 @@ export default function App() {
                      <span className="font-black uppercase tracking-widest text-xs">{isCapturing ? t.preparing : t.asImage}</span>
                   </button>
                   <button 
+                    onClick={shareAsGif}
+                    disabled={isCapturing}
+                    className="flex flex-col items-center gap-4 p-6 rounded-3xl bg-purple-600 text-white active:scale-95 transition-all disabled:opacity-50"
+                  >
+                     {isCapturing ? (
+                        <div className="flex flex-col items-center gap-2">
+                           <div className="animate-spin rounded-full h-8 w-8 border-4 border-white/20 border-t-white" />
+                           <span className="text-[10px] font-mono">{Math.round(captureProgress)}%</span>
+                        </div>
+                     ) : (
+                       <MusicIcon size={40} /> // Using MusicIcon as a representative for animation/video
+                     )}
+                     <span className="font-black uppercase tracking-widest text-xs">{isCapturing ? t.preparing : t.shareGif}</span>
+                  </button>
+                  <button 
                     onClick={shareAsText}
-                    className="flex flex-col items-center gap-4 p-6 rounded-3xl bg-slate-800 text-white active:scale-95 transition-all"
+                    className="flex flex-col items-center gap-4 p-6 rounded-3xl bg-slate-800 text-white active:scale-95 transition-all col-span-2"
                   >
                      <TypeIcon size={40} />
                      <span className="font-black uppercase tracking-widest text-xs">{t.asText}</span>
@@ -1516,24 +1798,63 @@ export default function App() {
         
         {/* PLAYER BODY */}
         <div 
-          className={`flex flex-col gap-4 p-5 rounded-[2.5rem] shadow-2xl relative overflow-hidden ${isA11yMode ? 'border-4 border-yellow-400 bg-black' : 'bg-gradient-to-br from-yellow-200 via-yellow-400 to-yellow-600 border-2 border-yellow-100'}`}
-          style={isA11yMode ? {} : { boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.8), 0 10px 25px -10px rgba(0,0,0,0.5)' }}
+          className={`flex flex-col gap-4 p-5 rounded-[2.5rem] shadow-2xl relative overflow-hidden ${isA11yMode ? 'border-4 border-yellow-400 bg-black' : 'bg-gradient-to-br from-yellow-100 via-yellow-400 to-yellow-600 border-2 border-yellow-100 shadow-[0_20px_50px_rgba(0,0,0,0.3)]'}`}
+          style={isA11yMode ? {} : { boxShadow: 'inset 0 4px 10px rgba(255,255,255,1), 0 15px 30px -10px rgba(0,0,0,0.4)' }}
         >
+          {/* Animated Waveform Simulation */}
+          {isAudioPlaying && !isA11yMode && (
+            <div className="absolute inset-0 h-full flex items-center justify-center gap-1 opacity-20 pointer-events-none">
+               {[...Array(15)].map((_, i) => (
+                 <motion.div 
+                   key={i}
+                   animate={{ height: [10, 40, 20, 50, 15] }}
+                   transition={{ repeat: Infinity, duration: 0.4 + Math.random(), ease: 'easeInOut' }}
+                   className="w-2 bg-yellow-900/40 rounded-full"
+                 />
+               ))}
+            </div>
+          )}
+
           {/* Progress Bar Area */}
-          <div className="flex flex-col gap-1">
-             <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-tighter text-yellow-900/60">
+          <div className="flex flex-col gap-1 relative z-10">
+             <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-yellow-950/70">
                 <span>{formatTime(audioCurrentTime)}</span>
-                <span className="font-bold flex items-center gap-1">
-                  <MusicIcon size={10} /> 
-                  {AUDIO_SOURCES.find(s => s.url === activeAudio)?.title}
+                <span className="font-black flex items-center gap-2">
+                   <div className="flex gap-0.5 h-3 items-end">
+                      {[1,2,3].map(i => (
+                        <motion.div key={i} animate={isAudioPlaying ? { height: [4, 12, 4] } : { height: 4 }} transition={{ repeat: Infinity, duration: 0.5 + (i * 0.2) }} className="w-1 bg-yellow-900 rounded-full" />
+                      ))}
+                   </div>
+                   {AUDIO_SOURCES.find(s => s.url === activeAudio)?.title}
                 </span>
                 <span>{formatTime(audioDuration)}</span>
              </div>
-             <div className="h-1.5 w-full bg-black/20 rounded-full overflow-hidden relative">
+             
+             {/* Enhanced Progress Scrub */}
+             <div className="group relative h-4 flex items-center cursor-pointer">
+                <input 
+                  type="range"
+                  min="0"
+                  max={audioDuration || 0}
+                  value={audioCurrentTime}
+                  onChange={(e) => {
+                    const time = parseFloat(e.target.value);
+                    if(playerRef.current) playerRef.current.currentTime = time;
+                    setAudioCurrentTime(time);
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer"
+                />
+                <div className="w-full h-2 bg-black/10 rounded-full overflow-hidden">
+                   <motion.div 
+                     initial={false}
+                     animate={{ width: `${(audioCurrentTime / (audioDuration || 1)) * 100}%` }}
+                     className="h-full bg-yellow-950 shadow-[0_0_10px_rgba(0,0,0,0.5)]"
+                   />
+                </div>
+                {/* Scrub Handle */}
                 <motion.div 
-                  initial={false}
-                  animate={{ width: `${(audioCurrentTime / (audioDuration || 1)) * 100}%` }}
-                  className="absolute inset-0 bg-yellow-900 rounded-full shadow-[0_0_8px_rgba(0,0,0,0.3)]"
+                   style={{ left: `${(audioCurrentTime / (audioDuration || 1)) * 100}%` }}
+                   className="absolute h-5 w-5 bg-white border-2 border-yellow-700 rounded-full shadow-lg -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity z-10"
                 />
              </div>
           </div>
